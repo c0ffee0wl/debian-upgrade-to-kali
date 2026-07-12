@@ -7,6 +7,7 @@ A single self-contained Bash script that converts a Debian 12+ (bookworm or newe
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
+- [Why this script](#why-this-script)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Usage](#usage)
@@ -19,6 +20,17 @@ A single self-contained Bash script that converts a Debian 12+ (bookworm or newe
 - [Acknowledgments](#acknowledgments)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+## Why this script
+
+Guides that flip `/etc/apt/sources.list` to `kali-rolling` and run a full upgrade are easy to find. The interesting part is everything around that happy path, and that's what this script is for:
+
+- It disables the Debian repositories rather than mixing them with Kali's, since repo mixing is explicitly unsupported by Kali and a common cause of broken conversions. The originals go to a backup directory instead of being deleted.
+- The apt setup follows current Kali practice: a deb822 `kali.sources` file whose `Signed-By` points at the archive keyring, instead of the deprecated `apt-key`.
+- It checks disk space before touching anything. On systemd-boot systems the kernel and full initrd land on the EFI System Partition, and Kali's initrds are several times larger than Debian's, so small cloud ESPs overflow mid-upgrade. The preflight detects that layout and makes room first.
+- If the kernel copy still runs out of space mid-upgrade, the script recovers on its own: it cleans the ESP, frees only as much space as needed, repairs dpkg, and retries once.
+- Interrupted runs are resumable. The state marker survives the failure, so re-running repairs dpkg and continues with the same settings instead of starting over.
+- It picks the metapackage to match the system (`kali-linux-default` with a desktop, `kali-linux-headless` without) and supports unattended use with `--yes`, which still never auto-answers the one genuinely dangerous question: whether to remove boot files that may belong to another OS.
 
 ## Requirements
 
@@ -70,7 +82,7 @@ sudo ./upgrade-to-kali.sh --skip-preflight
 
 1. Runs a disk-space preflight (see below). On a hopelessly small EFI System Partition it aborts before anything irreversible happens.
 2. Downloads the Kali archive keyring and adds the `kali-rolling` repository as a deb822 file (`/etc/apt/sources.list.d/kali.sources`, `Signed-By` the keyring).
-3. **Disables** the existing Debian repositories — Kali doesn't support mixing Debian and Kali repos. Backups go to `/etc/apt/upgrade-to-kali-backup/`.
+3. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos. Backups go to `/etc/apt/upgrade-to-kali-backup/`.
 4. Runs `apt-get full-upgrade` against `kali-rolling`, which rebases the base system onto Kali (this flips `/etc/os-release` to Kali).
 5. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` environment variable).
 6. Removes no-longer-needed packages (`autoremove --purge`) and cleans the apt cache.
