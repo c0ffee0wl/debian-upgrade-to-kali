@@ -1,0 +1,13 @@
+# Local AI/agent scaffolding (not published)
+.claude/
+CLAUDE.md
+docs/superpowers/
+
+# Secrets
+.env
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+.DS_Store
