@@ -56,7 +56,7 @@ sudo upgrade-to-kali
 ```bash
 sudo ./upgrade-to-kali.sh              # interactive: type YES to proceed
 sudo ./upgrade-to-kali.sh --yes        # non-interactive (required when stdin is not a terminal)
-sudo ./upgrade-to-kali.sh --skip-preflight   # skip the disk-space preflight checks
+sudo ./upgrade-to-kali.sh --skip-preflight
 ./upgrade-to-kali.sh --help            # show help (works unprivileged)
 ```
 
