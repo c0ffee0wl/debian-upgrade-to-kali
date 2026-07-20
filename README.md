@@ -1,6 +1,6 @@
 # upgrade-to-kali
 
-A single self-contained Bash script that converts a Debian 12+ (bookworm or newer) system into Kali Linux in place. It checks your disk space before touching anything and digs itself out when the EFI partition runs full mid-upgrade. Interrupted runs resume where they left off.
+A single self-contained Bash script that converts a Debian 12+ (bookworm or newer) system into Kali Linux in place. It checks your disk space before touching anything and digs itself out when the EFI partition runs full or a mirror goes down mid-upgrade. Interrupted runs resume where they left off.
 
 > **Important**: This performs an effectively irreversible base-system rebase onto `kali-rolling`. Take a VM snapshot or backup first. It only works on Debian, not Ubuntu. From Debian 12 (bookworm) it's a larger jump than from 13, because the rebase skips a Debian release.
 
@@ -13,6 +13,7 @@ A single self-contained Bash script that converts a Debian 12+ (bookworm or newe
 - [Usage](#usage)
 - [What it does](#what-it-does)
 - [Disk-space preflight and ESP handling](#disk-space-preflight-and-esp-handling)
+- [Mirror and network failures](#mirror-and-network-failures)
 - [Resume after interruption](#resume-after-interruption)
 - [Environment overrides](#environment-overrides)
 - [Troubleshooting](#troubleshooting)
@@ -29,6 +30,7 @@ Guides that flip `/etc/apt/sources.list` to `kali-rolling` and run a full upgrad
 - The apt setup follows current Kali practice: a deb822 `kali.sources` file whose `Signed-By` points at the archive keyring, instead of the deprecated `apt-key`.
 - It checks disk space before touching anything. On systemd-boot systems the kernel and full initrd land on the EFI System Partition, and Kali's initrds are several times larger than Debian's, so small cloud ESPs overflow mid-upgrade. The preflight detects that layout and makes room first.
 - If the kernel copy still runs out of space mid-upgrade, the script recovers on its own: it cleans the ESP, frees only as much space as needed, repairs dpkg, and retries once.
+- A failed step is diagnosed before it's retried. Out-of-space failures take the ESP ladder; mirror and network failures get delayed retries with a package-list refresh instead, so a dead mirror isn't mistaken for a full disk.
 - Interrupted runs are resumable. The state marker survives the failure, so re-running repairs dpkg and continues with the same settings instead of starting over.
 - It picks the metapackage to match the system (`kali-linux-default` with a desktop, `kali-linux-headless` without) and supports unattended use with `--yes`, which still never auto-answers the one genuinely dangerous question: whether to remove boot files that may belong to another OS.
 
@@ -105,9 +107,20 @@ If the kernel copy still hits `No space left on device` mid-upgrade despite all 
 
 On an ESP too small to ever hold two kernel+initrd pairs, the script finishes with a warning: once the new kernel has survived a reboot, purge the old one, and purge the previous kernel before every future kernel upgrade too. Otherwise the next kernel update runs into the same out-of-space error.
 
+## Mirror and network failures
+
+A `full-upgrade` onto `kali-rolling` fetches hundreds of packages, and the `http.kali.org` redirector can hand out a mirror that is unreachable or mid-sync. Both apt and the keyring download therefore retry transient failures on their own, and each conversion step's output is captured and classified when it fails, so the recovery matches the cause:
+
+- **Out of space** takes the ESP ladder above (checked first: a failure that is both needs space, not patience).
+- **Fetch, DNS, and mid-sync errors** (unreachable mirror, timeouts, `Hash Sum mismatch`, `File has unexpected size`) get delayed retries with a growing backoff, refreshing the package lists in between so the redirector can pick a healthier mirror. Already-downloaded packages stay cached, so a retry only fetches what is still missing. There is deliberately no `--fix-missing`: a distro rebase must not proceed with packages it couldn't get.
+- **Broken IPv6 routing** — apt failing over an IPv6 address with `Network is unreachable` — switches the rest of the run to IPv4.
+- **A mirror that keeps failing** is swapped for Kali's `kali.download` CDN on the last retry. It stays in your sources afterwards (both are official Kali mirrors). This is skipped entirely if you pinned `KALI_MIRROR` yourself.
+
+Anything the script can't classify keeps the previous behaviour: run the ESP ladder, retry once.
+
 ## Resume after interruption
 
-If the conversion fails midway (network drop, Ctrl-C), the script prints the recovery commands and leaves a marker at `/var/lib/upgrade-to-kali/state`. Just re-run it: it repairs dpkg (`dpkg --configure -a`, `apt-get -f install`) and resumes where it left off, keeping the originally chosen metapackage. A conversion that was finished out-of-band is detected and the marker cleaned up.
+If the conversion fails midway (network down for good, Ctrl-C), the script prints recovery commands matched to what actually went wrong — a mirror or network failure gets "re-run to resume, apt only fetches what's still missing, pin a mirror with `KALI_MIRROR`" rather than ESP advice — along with the path to the failed step's captured output, and leaves a marker at `/var/lib/upgrade-to-kali/state`. Just re-run it: it repairs dpkg (`dpkg --configure -a`, `apt-get -f install`) and resumes where it left off, keeping the originally chosen metapackage. A conversion that was finished out-of-band is detected and the marker cleaned up.
 
 ## Environment overrides
 
@@ -116,7 +129,10 @@ The interesting knobs (set as environment variables before invoking):
 | Variable | Default | Purpose |
 |---|---|---|
 | `KALI_METAPACKAGE` | auto | Force the metapackage (`kali-linux-headless`, `kali-linux-default`, ...) instead of desktop auto-detection. |
-| `KALI_MIRROR` | `http://http.kali.org/kali` | Use a different Kali mirror. |
+| `KALI_MIRROR` | `http://http.kali.org/kali` | Use a different Kali mirror. Setting it also disables the automatic CDN failover. |
+| `KALI_FALLBACK_MIRROR` | `https://kali.download/kali` | Mirror to fail over to when the configured one keeps failing. |
+| `NET_RETRIES` | `2` | Delayed retries per step for mirror/network failures. |
+| `NET_RETRY_DELAY` | `20` | Seconds before the first retry; doubled for each further one. |
 | `KEYRING_URL` | `https://archive.kali.org/archive-keyring.gpg` | Where the archive keyring is downloaded from. |
 | `ESP_PATH` | auto | Pin the EFI System Partition mountpoint when auto-detection misfires. |
 | `ROOT_MIN_FREE_KIB` | `6291456` (6 GiB) | Free-space floor on `/` (warn-only). |
