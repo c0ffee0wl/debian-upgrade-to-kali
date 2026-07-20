@@ -13,7 +13,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.5.0"
+VERSION="1.5.1"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -185,10 +185,12 @@ ask_yn_no() {
     [ "$r" = "y" ] || [ "$r" = "Y" ]
 }
 
-# Non-interactive apt-get: lock-wait + safe conffile handling.
+# Non-interactive apt-get: lock-wait + safe conffile handling + bounded
+# download retries (a full-upgrade fetches hundreds of packages - one
+# transient mirror hiccup must not abort the conversion).
 apt_ni() {
     DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
-        -o DPkg::Lock::Timeout=300 \
+        -o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
         "$@"
 }
@@ -886,7 +888,9 @@ resolve_metapackage() {
 install_keyring() {
     log "Installing Kali archive keyring -> $KEYRING_PATH"
     local tmp; tmp=$(mktemp)
-    if ! wget -qO "$tmp" "$KEYRING_URL"; then
+    # Bounded retries (default is 20 tries): same transient-failure policy as
+    # apt_ni's Acquire::Retries - one network blip must not abort the conversion.
+    if ! wget -q --tries=3 --waitretry=2 --retry-connrefused -O "$tmp" "$KEYRING_URL"; then
         rm -f "$tmp"; err "Failed to download Kali keyring from $KEYRING_URL"
     fi
     install -o root -g root -m 644 "$tmp" "$KEYRING_PATH"
