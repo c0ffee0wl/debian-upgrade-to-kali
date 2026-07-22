@@ -160,4 +160,4 @@ Licensed under the [Apache License 2.0](LICENSE).
 ## Acknowledgments
 
 - Follows the official [Kali apt-sources guidance](https://www.kali.org/docs/general-use/kali-apt-sources/) (no Debian/Kali repo mixing).
-- This tool originated as part of a larger personal Linux setup script and was extracted into its own project.
+- Extracted from [linux-setup](https://github.com/c0ffee0wl/linux-setup), a broader setup script for fresh Debian, Ubuntu, and Kali installs. It still bundles this converter and installs it as `/usr/local/bin/upgrade-to-kali` on Debian 12 or newer.
